@@ -9,6 +9,8 @@ import '../models/visit_models.dart';
 import '../services/photo_scan_service.dart';
 import '../services/scan_cache_service.dart';
 import '../services/visit_builder.dart';
+import '../utils/date_range_format.dart';
+import 'visit_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -462,15 +464,18 @@ class _CountryTile extends StatelessWidget {
           color: theme.colorScheme.onSurfaceVariant,
         ),
       ),
-      children: country.cities.map((c) => _CityTile(city: c)).toList(),
+      children: country.cities
+          .map((c) => _CityTile(city: c, countryName: country.countryName))
+          .toList(),
     );
   }
 }
 
 class _CityTile extends StatelessWidget {
-  const _CityTile({required this.city});
+  const _CityTile({required this.city, required this.countryName});
 
   final CitySummary city;
+  final String countryName;
 
   @override
   Widget build(BuildContext context) {
@@ -495,8 +500,18 @@ class _CityTile extends StatelessWidget {
           children: city.segments
               .map(
                 (seg) => ListTile(
-                  title: Text(_formatVisitRange(seg.start, seg.end)),
+                  title: Text(formatVisitRange(seg.start, seg.end)),
                   subtitle: Text('${seg.photoCount} photos'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => VisitDetailScreen(
+                        segment: seg,
+                        cityName: city.cityName,
+                        countryName: countryName,
+                      ),
+                    ),
+                  ),
                 ),
               )
               .toList(),
@@ -508,15 +523,3 @@ class _CityTile extends StatelessWidget {
 
 String _formatLastUpdated(DateTime dt) =>
     'Last updated ${DateFormat.yMMMd().add_jm().format(dt)}';
-
-String _formatVisitRange(DateTime start, DateTime end) {
-  final sameDay =
-      start.year == end.year && start.month == end.month && start.day == end.day;
-  if (sameDay) return DateFormat.yMMMMd().format(start);
-
-  final sameYear = start.year == end.year;
-  if (sameYear) {
-    return '${DateFormat.MMMd().format(start)} – ${DateFormat.MMMd().format(end)}, ${start.year}';
-  }
-  return '${DateFormat.yMMMd().format(start)} – ${DateFormat.yMMMd().format(end)}';
-}

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'screens/home_screen.dart';
+import 'screens/roamly_shell.dart';
 import 'theme/roamly_theme.dart';
 
 void main() {
@@ -16,7 +16,7 @@ class RoamlyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Roamly',
       theme: buildRoamlyTheme(),
-      home: const HomeScreen(),
+      home: const RoamlyShell(),
     );
   }
 }

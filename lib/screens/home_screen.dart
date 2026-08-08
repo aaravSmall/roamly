@@ -11,10 +11,20 @@ import '../services/scan_cache_service.dart';
 import '../services/visit_builder.dart';
 import '../utils/date_range_format.dart';
 import 'visit_detail_screen.dart';
-import 'world_map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({
+    super.key,
+    required this.countries,
+    required this.lastScannedAt,
+    required this.onResultsChanged,
+  });
+
+  /// Current results, owned by RoamlyShell so the Trips and Map tabs stay in
+  /// sync. `null` means no scan has completed and no cache was found yet.
+  final List<CountrySummary>? countries;
+  final DateTime? lastScannedAt;
+  final void Function(List<CountrySummary> countries, DateTime scannedAt) onResultsChanged;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -22,8 +32,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   PermissionState? _permissionState;
-  List<CountrySummary>? _countries;
-  DateTime? _lastUpdated;
 
   bool _loadingPermission = true;
   bool _scanning = false;
@@ -38,21 +46,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _init();
-  }
-
-  Future<void> _init() async {
-    await _loadCache();
-    await _syncPermission();
-  }
-
-  Future<void> _loadCache() async {
-    final cached = await _cacheService.load();
-    if (!mounted || cached == null) return;
-    setState(() {
-      _countries = cached.countries;
-      _lastUpdated = cached.scannedAt;
-    });
+    _syncPermission();
   }
 
   @override
@@ -122,8 +116,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!mounted) return;
 
       if (geoPhotos.isEmpty) {
+        widget.onResultsChanged(const [], DateTime.now());
+        if (!mounted) return;
         setState(() {
-          _countries = [];
           _scanning = false;
           _phaseProgress = null;
           _statusLine = '';
@@ -151,11 +146,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       final scanResult = ScanResult(scannedAt: DateTime.now(), countries: summaries);
       await _cacheService.save(scanResult);
+      if (!mounted) return;
 
+      widget.onResultsChanged(summaries, scanResult.scannedAt);
       if (!mounted) return;
       setState(() {
-        _countries = summaries;
-        _lastUpdated = scanResult.scannedAt;
         _scanning = false;
         _phaseProgress = null;
         _statusLine = '';
@@ -183,15 +178,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         title: const Text('Roamly'),
         actions: [
-          IconButton(
-            tooltip: 'World Map (debug)',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => WorldMapScreen(countries: _countries ?? const []),
-              ),
-            ),
-            icon: const Icon(Icons.public),
-          ),
           if (!_loadingPermission)
             IconButton(
               tooltip: ps?.hasAccess ?? false ? 'Scan again' : 'Scan or allow photos',
@@ -265,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     final hasAccess = ps?.hasAccess ?? false;
-    final data = _countries;
+    final data = widget.countries;
 
     // Cached results are shown regardless of permission state — only scanning
     // again requires photo access.
@@ -286,11 +272,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_lastUpdated != null)
+        if (widget.lastScannedAt != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Text(
-              _formatLastUpdated(_lastUpdated!),
+              _formatLastUpdated(widget.lastScannedAt!),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

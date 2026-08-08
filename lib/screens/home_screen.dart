@@ -11,6 +11,7 @@ import '../services/scan_cache_service.dart';
 import '../services/visit_builder.dart';
 import '../utils/date_range_format.dart';
 import 'visit_detail_screen.dart';
+import 'world_map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -182,6 +183,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         title: const Text('Roamly'),
         actions: [
+          IconButton(
+            tooltip: 'World Map (debug)',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => WorldMapScreen(countries: _countries ?? const []),
+              ),
+            ),
+            icon: const Icon(Icons.public),
+          ),
           if (!_loadingPermission)
             IconButton(
               tooltip: ps?.hasAccess ?? false ? 'Scan again' : 'Scan or allow photos',

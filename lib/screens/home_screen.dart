@@ -18,6 +18,8 @@ class HomeScreen extends StatefulWidget {
     required this.countries,
     required this.lastScannedAt,
     required this.onResultsChanged,
+    this.focusCountryCode,
+    this.onFocusHandled,
   });
 
   /// Current results, owned by RoamlyShell so the Trips and Map tabs stay in
@@ -25,6 +27,12 @@ class HomeScreen extends StatefulWidget {
   final List<CountrySummary>? countries;
   final DateTime? lastScannedAt;
   final void Function(List<CountrySummary> countries, DateTime scannedAt) onResultsChanged;
+
+  /// Country code to auto-expand and scroll into view (e.g. after tapping
+  /// "View trips" on the World Map). Consumed once, then [onFocusHandled]
+  /// is called to clear it.
+  final String? focusCountryCode;
+  final VoidCallback? onFocusHandled;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -42,11 +50,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final VisitBuilder _visitBuilder = VisitBuilder();
   final ScanCacheService _cacheService = ScanCacheService();
 
+  final Map<String, GlobalKey> _countryTileKeys = {};
+  final Map<String, ExpansibleController> _countryTileControllers = {};
+
+  GlobalKey _keyFor(String countryCode) =>
+      _countryTileKeys.putIfAbsent(countryCode, () => GlobalKey());
+
+  ExpansibleController _controllerFor(String countryCode) =>
+      _countryTileControllers.putIfAbsent(countryCode, () => ExpansibleController());
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _syncPermission();
+    if (widget.focusCountryCode != null) {
+      _scheduleFocus(widget.focusCountryCode!);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.focusCountryCode != null &&
+        widget.focusCountryCode != oldWidget.focusCountryCode) {
+      _scheduleFocus(widget.focusCountryCode!);
+    }
+  }
+
+  void _scheduleFocus(String countryCode) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _countryTileControllers[countryCode]?.expand();
+      final tileContext = _countryTileKeys[countryCode]?.currentContext;
+      if (tileContext != null) {
+        Scrollable.ensureVisible(
+          tileContext,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          alignment: 0.05,
+        );
+      }
+      widget.onFocusHandled?.call();
+    });
   }
 
   @override
@@ -288,7 +334,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             itemCount: data.length,
             itemBuilder: (context, index) {
               final country = data[index];
-              return _CountryTile(country: country);
+              return _CountryTile(
+                key: _keyFor(country.countryCode),
+                country: country,
+                controller: _controllerFor(country.countryCode),
+              );
             },
           ),
         ),
@@ -433,9 +483,10 @@ class _NoGeoPhotosPrompt extends StatelessWidget {
 }
 
 class _CountryTile extends StatelessWidget {
-  const _CountryTile({required this.country});
+  const _CountryTile({super.key, required this.country, required this.controller});
 
   final CountrySummary country;
+  final ExpansibleController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -444,7 +495,7 @@ class _CountryTile extends StatelessWidget {
     final avatar = code.length >= 2 ? code.substring(0, 2) : code;
 
     return ExpansionTile(
-      key: PageStorageKey<String>('country-$code'),
+      controller: controller,
       leading: CircleAvatar(
         backgroundColor: context.roamlyExtra.visitedMarker,
         foregroundColor: RoamlyPalette.deepSlate,

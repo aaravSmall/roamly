@@ -8,9 +8,18 @@ import '../services/world_map_country_names.dart';
 import '../theme/roamly_theme.dart';
 
 class WorldMapScreen extends StatelessWidget {
-  const WorldMapScreen({super.key, required this.countries});
+  const WorldMapScreen({
+    super.key,
+    required this.countries,
+    required this.onViewCountryTrips,
+  });
 
   final List<CountrySummary> countries;
+
+  /// Invoked with a country code when the user taps "View trips" in the
+  /// per-country bottom sheet. The parent (RoamlyShell) is expected to
+  /// switch to the Trips tab and focus that country.
+  final void Function(String countryCode) onViewCountryTrips;
 
   @override
   Widget build(BuildContext context) {
@@ -61,8 +70,8 @@ class WorldMapScreen extends StatelessWidget {
       ),
     );
 
-    if (viewTrips == true && context.mounted) {
-      Navigator.of(context).pop();
+    if (viewTrips == true && country != null) {
+      onViewCountryTrips(country.countryCode);
     }
   }
 }

@@ -20,6 +20,7 @@ class _RoamlyShellState extends State<RoamlyShell> {
   bool _cacheLoaded = false;
 
   int _tabIndex = 0;
+  String? _focusCountryCode;
 
   @override
   void initState() {
@@ -46,6 +47,17 @@ class _RoamlyShellState extends State<RoamlyShell> {
     });
   }
 
+  void _viewCountryTrips(String countryCode) {
+    setState(() {
+      _tabIndex = 0;
+      _focusCountryCode = countryCode;
+    });
+  }
+
+  void _clearFocusCountry() {
+    setState(() => _focusCountryCode = null);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_cacheLoaded) {
@@ -60,8 +72,13 @@ class _RoamlyShellState extends State<RoamlyShell> {
             countries: _countries,
             lastScannedAt: _lastScannedAt,
             onResultsChanged: _handleResultsChanged,
+            focusCountryCode: _focusCountryCode,
+            onFocusHandled: _clearFocusCountry,
           ),
-          WorldMapScreen(countries: _countries ?? const []),
+          WorldMapScreen(
+            countries: _countries ?? const [],
+            onViewCountryTrips: _viewCountryTrips,
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(

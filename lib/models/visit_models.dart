@@ -7,6 +7,9 @@ class VisitSegment {
     required this.end,
     required this.photoCount,
     required this.photoIds,
+    this.manualId,
+    this.centroidLatitude,
+    this.centroidLongitude,
   });
 
   final ResolvedPlace place;
@@ -17,12 +20,28 @@ class VisitSegment {
   /// AssetEntity ids (from photo_manager) of every photo merged into this segment.
   final List<String> photoIds;
 
+  /// Set (to a unique id) only for trips added by hand via the "Add trip"
+  /// form, rather than derived from geotagged photos. Used to find this
+  /// segment again in [ManualTripService]'s list for deletion.
+  final String? manualId;
+
+  /// Mean coordinates of the photos merged into this segment. Null for
+  /// manually-added trips (no photos) and for segments loaded from
+  /// pre-existing cached JSON that predates these fields.
+  final double? centroidLatitude;
+  final double? centroidLongitude;
+
+  bool get isManual => manualId != null;
+
   Map<String, dynamic> toJson() => {
         'place': place.toJson(),
         'start': start.toIso8601String(),
         'end': end.toIso8601String(),
         'photoCount': photoCount,
         'photoIds': photoIds,
+        'manualId': manualId,
+        'centroidLatitude': centroidLatitude,
+        'centroidLongitude': centroidLongitude,
       };
 
   factory VisitSegment.fromJson(Map<String, dynamic> json) => VisitSegment(
@@ -33,6 +52,9 @@ class VisitSegment {
         photoIds: (json['photoIds'] as List<dynamic>)
             .map((e) => e as String)
             .toList(),
+        manualId: json['manualId'] as String?,
+        centroidLatitude: (json['centroidLatitude'] as num?)?.toDouble(),
+        centroidLongitude: (json['centroidLongitude'] as num?)?.toDouble(),
       );
 }
 

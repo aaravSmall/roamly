@@ -30,8 +30,16 @@ class VisitBuilder {
 
     tagged.sort((a, b) => a.photo.takenAt.compareTo(b.photo.takenAt));
     final segments = _segmentsFromTagged(tagged);
-    return _rollupByCountry(segments);
+    return rollupByCountry(segments);
   }
+
+  /// Flattens a rolled-up country/city tree back into its individual
+  /// segments, e.g. so manually-added trips can be merged in and the whole
+  /// set re-rolled via [rollupByCountry].
+  static List<VisitSegment> flatten(List<CountrySummary> countries) => [
+        for (final country in countries)
+          for (final city in country.cities) ...city.segments,
+      ];
 
   List<VisitSegment> _segmentsFromTagged(List<TaggedPhoto> sorted) {
     final out = <VisitSegment>[];
@@ -39,6 +47,8 @@ class VisitBuilder {
     var start = sorted.first.photo.takenAt;
     var end = sorted.first.photo.takenAt;
     var photoIds = <String>[sorted.first.photo.assetId];
+    var latSum = sorted.first.photo.lat;
+    var lngSum = sorted.first.photo.lng;
 
     for (var i = 1; i < sorted.length; i++) {
       final cur = sorted[i];
@@ -49,6 +59,8 @@ class VisitBuilder {
       if (samePlace && gapDays <= maxGapDays) {
         end = cur.photo.takenAt;
         photoIds.add(cur.photo.assetId);
+        latSum += cur.photo.lat;
+        lngSum += cur.photo.lng;
       } else {
         out.add(
           VisitSegment(
@@ -57,12 +69,16 @@ class VisitBuilder {
             end: end,
             photoCount: photoIds.length,
             photoIds: photoIds,
+            centroidLatitude: latSum / photoIds.length,
+            centroidLongitude: lngSum / photoIds.length,
           ),
         );
         place = cur.place;
         start = cur.photo.takenAt;
         end = cur.photo.takenAt;
         photoIds = <String>[cur.photo.assetId];
+        latSum = cur.photo.lat;
+        lngSum = cur.photo.lng;
       }
     }
 
@@ -73,12 +89,14 @@ class VisitBuilder {
         end: end,
         photoCount: photoIds.length,
         photoIds: photoIds,
+        centroidLatitude: latSum / photoIds.length,
+        centroidLongitude: lngSum / photoIds.length,
       ),
     );
     return out;
   }
 
-  List<CountrySummary> _rollupByCountry(List<VisitSegment> segments) {
+  static List<CountrySummary> rollupByCountry(List<VisitSegment> segments) {
     final byCountry = <String, List<VisitSegment>>{};
     final countryNames = <String, String>{};
 

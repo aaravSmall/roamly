@@ -10,6 +10,7 @@ import '../services/photo_scan_service.dart';
 import '../services/scan_cache_service.dart';
 import '../services/visit_builder.dart';
 import '../utils/date_range_format.dart';
+import 'create_trip_sheet.dart';
 import 'visit_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -18,6 +19,8 @@ class HomeScreen extends StatefulWidget {
     required this.countries,
     required this.lastScannedAt,
     required this.onResultsChanged,
+    required this.onManualTripAdded,
+    required this.onDeleteManualTrip,
     this.focusCountryCode,
     this.onFocusHandled,
   });
@@ -27,6 +30,14 @@ class HomeScreen extends StatefulWidget {
   final List<CountrySummary>? countries;
   final DateTime? lastScannedAt;
   final void Function(List<CountrySummary> countries, DateTime scannedAt) onResultsChanged;
+
+  /// Called with a new [VisitSegment] (`isManual == true`) when the user
+  /// submits the "Add trip" form.
+  final void Function(VisitSegment segment) onManualTripAdded;
+
+  /// Called with a manually-added segment's [VisitSegment.manualId] when the
+  /// user removes it.
+  final void Function(String manualId) onDeleteManualTrip;
 
   /// Country code to auto-expand and scroll into view (e.g. after tapping
   /// "View trips" on the World Map). Consumed once, then [onFocusHandled]
@@ -215,6 +226,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _addTrip() async {
+    final segment = await showCreateTripSheet(context);
+    if (segment != null) widget.onManualTripAdded(segment);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -238,6 +254,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ps,
               theme,
               _buildMain(ps, theme),
+            ),
+      floatingActionButton: _scanning
+          ? null
+          : FloatingActionButton(
+              tooltip: 'Add trip',
+              onPressed: _addTrip,
+              child: const Icon(Icons.add),
             ),
     );
   }
@@ -338,6 +361,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 key: _keyFor(country.countryCode),
                 country: country,
                 controller: _controllerFor(country.countryCode),
+                onDeleteManualTrip: widget.onDeleteManualTrip,
               );
             },
           ),
@@ -483,10 +507,16 @@ class _NoGeoPhotosPrompt extends StatelessWidget {
 }
 
 class _CountryTile extends StatelessWidget {
-  const _CountryTile({super.key, required this.country, required this.controller});
+  const _CountryTile({
+    super.key,
+    required this.country,
+    required this.controller,
+    required this.onDeleteManualTrip,
+  });
 
   final CountrySummary country;
   final ExpansibleController controller;
+  final void Function(String manualId) onDeleteManualTrip;
 
   @override
   Widget build(BuildContext context) {
@@ -512,17 +542,28 @@ class _CountryTile extends StatelessWidget {
         ),
       ),
       children: country.cities
-          .map((c) => _CityTile(city: c, countryName: country.countryName))
+          .map(
+            (c) => _CityTile(
+              city: c,
+              countryName: country.countryName,
+              onDeleteManualTrip: onDeleteManualTrip,
+            ),
+          )
           .toList(),
     );
   }
 }
 
 class _CityTile extends StatelessWidget {
-  const _CityTile({required this.city, required this.countryName});
+  const _CityTile({
+    required this.city,
+    required this.countryName,
+    required this.onDeleteManualTrip,
+  });
 
   final CitySummary city;
   final String countryName;
+  final void Function(String manualId) onDeleteManualTrip;
 
   @override
   Widget build(BuildContext context) {
@@ -546,20 +587,30 @@ class _CityTile extends StatelessWidget {
           ),
           children: city.segments
               .map(
-                (seg) => ListTile(
-                  title: Text(formatVisitRange(seg.start, seg.end)),
-                  subtitle: Text('${seg.photoCount} photos'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => VisitDetailScreen(
-                        segment: seg,
-                        cityName: city.cityName,
-                        countryName: countryName,
+                (seg) => seg.isManual
+                    ? ListTile(
+                        title: Text(formatVisitRange(seg.start, seg.end)),
+                        subtitle: const Text('Added manually'),
+                        trailing: IconButton(
+                          tooltip: 'Remove trip',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => onDeleteManualTrip(seg.manualId!),
+                        ),
+                      )
+                    : ListTile(
+                        title: Text(formatVisitRange(seg.start, seg.end)),
+                        subtitle: Text('${seg.photoCount} photos'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => VisitDetailScreen(
+                              segment: seg,
+                              cityName: city.cityName,
+                              countryName: countryName,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                ),
               )
               .toList(),
         ),

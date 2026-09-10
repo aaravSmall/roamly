@@ -12,12 +12,14 @@ class VisitBuilder {
   /// Splits stays when chronological gap exceeds [maxGapDays] between photos.
   static const int maxGapDays = 14;
 
-  Future<List<CountrySummary>> buildFromPhotos(
+  /// Reverse-geocodes every photo into a [TaggedPhoto]. Split out from the
+  /// old single-shot `buildFromPhotos` so callers can intervene between
+  /// resolution and [buildFromTagged] — e.g. to detect/apply a home-radius
+  /// filter before segments are built.
+  Future<List<TaggedPhoto>> resolvePhotos(
     List<GeoPhoto> photos, {
     ResolveProgress? onResolveProgress,
   }) async {
-    if (photos.isEmpty) return [];
-
     final tagged = <TaggedPhoto>[];
     final total = photos.length;
 
@@ -28,8 +30,16 @@ class VisitBuilder {
       onResolveProgress?.call(done: i + 1, total: total);
     }
 
-    tagged.sort((a, b) => a.photo.takenAt.compareTo(b.photo.takenAt));
-    final segments = _segmentsFromTagged(tagged);
+    return tagged;
+  }
+
+  /// Builds the Country -> City -> Visit tree from already-resolved photos
+  /// (see [resolvePhotos]).
+  static List<CountrySummary> buildFromTagged(List<TaggedPhoto> taggedPhotos) {
+    if (taggedPhotos.isEmpty) return [];
+    final sorted = [...taggedPhotos]
+      ..sort((a, b) => a.photo.takenAt.compareTo(b.photo.takenAt));
+    final segments = _segmentsFromTagged(sorted);
     return rollupByCountry(segments);
   }
 
@@ -41,7 +51,7 @@ class VisitBuilder {
           for (final city in country.cities) ...city.segments,
       ];
 
-  List<VisitSegment> _segmentsFromTagged(List<TaggedPhoto> sorted) {
+  static List<VisitSegment> _segmentsFromTagged(List<TaggedPhoto> sorted) {
     final out = <VisitSegment>[];
     var place = sorted.first.place;
     var start = sorted.first.photo.takenAt;

@@ -4,13 +4,20 @@ import 'package:photo_manager/photo_manager.dart';
 
 import '../photo_permission.dart';
 import '../theme/roamly_theme.dart';
+import '../models/geo_photo.dart';
+import '../models/home_location.dart';
 import '../models/scan_result.dart';
 import '../models/visit_models.dart';
+import '../services/home_candidates.dart';
+import '../services/home_detector.dart';
+import '../services/home_location_service.dart';
 import '../services/photo_scan_service.dart';
 import '../services/scan_cache_service.dart';
+import '../services/trip_filter.dart';
 import '../services/visit_builder.dart';
 import '../utils/date_range_format.dart';
 import 'create_trip_sheet.dart';
+import 'home_confirm_screen.dart';
 import 'visit_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -18,7 +25,10 @@ class HomeScreen extends StatefulWidget {
     super.key,
     required this.countries,
     required this.lastScannedAt,
+    required this.totalPhotosAnalyzed,
+    required this.home,
     required this.onResultsChanged,
+    required this.onHomeChanged,
     required this.onManualTripAdded,
     required this.onDeleteManualTrip,
     this.focusCountryCode,
@@ -29,7 +39,29 @@ class HomeScreen extends StatefulWidget {
   /// sync. `null` means no scan has completed and no cache was found yet.
   final List<CountrySummary>? countries;
   final DateTime? lastScannedAt;
-  final void Function(List<CountrySummary> countries, DateTime scannedAt) onResultsChanged;
+
+  /// Geotagged photos considered in the last scan, before the home-radius
+  /// filter excluded any of them — for the "N photos analyzed" stat line.
+  final int? totalPhotosAnalyzed;
+
+  /// The confirmed (or still-just-detected) home location, owned by
+  /// RoamlyShell so every screen sees the same one.
+  final HomeLocation? home;
+
+  /// Called after a scan completes with everything RoamlyShell needs to
+  /// persist and share: the built trip tree, when the scan ran, how many
+  /// geotagged photos were considered, and the fully-resolved (unfiltered)
+  /// photo list — kept in memory so a later home change can re-filter
+  /// without a full re-scan.
+  final void Function({
+    required List<CountrySummary> countries,
+    required DateTime scannedAt,
+    required int totalPhotosAnalyzed,
+    required List<TaggedPhoto> taggedPhotos,
+  }) onResultsChanged;
+
+  /// Called whenever a home is detected/confirmed/changed from this screen.
+  final void Function(HomeLocation home) onHomeChanged;
 
   /// Called with a new [VisitSegment] (`isManual == true`) when the user
   /// submits the "Add trip" form.
@@ -60,6 +92,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   final VisitBuilder _visitBuilder = VisitBuilder();
   final ScanCacheService _cacheService = ScanCacheService();
+  final HomeLocationService _homeLocationService = HomeLocationService();
 
   final Map<String, GlobalKey> _countryTileKeys = {};
   final Map<String, ExpansibleController> _countryTileControllers = {};
@@ -173,7 +206,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!mounted) return;
 
       if (geoPhotos.isEmpty) {
-        widget.onResultsChanged(const [], DateTime.now());
+        widget.onResultsChanged(
+          countries: const [],
+          scannedAt: DateTime.now(),
+          totalPhotosAnalyzed: 0,
+          taggedPhotos: const [],
+        );
         if (!mounted) return;
         setState(() {
           _scanning = false;
@@ -188,7 +226,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _statusLine = 'Looking up places (${geoPhotos.length} photos)…';
       });
 
-      final summaries = await _visitBuilder.buildFromPhotos(
+      final taggedPhotos = await _visitBuilder.resolvePhotos(
         geoPhotos,
         onResolveProgress: ({required int done, required int total}) {
           if (!mounted) return;
@@ -201,11 +239,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       if (!mounted) return;
 
-      final scanResult = ScanResult(scannedAt: DateTime.now(), countries: summaries);
+      final home = await _resolveHome(taggedPhotos);
+      if (!mounted) return;
+
+      final filtered = filterOutHomeRadius(taggedPhotos, home);
+      final summaries = VisitBuilder.buildFromTagged(filtered);
+
+      final scanResult = ScanResult(
+        scannedAt: DateTime.now(),
+        countries: summaries,
+        totalPhotosAnalyzed: geoPhotos.length,
+      );
       await _cacheService.save(scanResult);
       if (!mounted) return;
 
-      widget.onResultsChanged(summaries, scanResult.scannedAt);
+      widget.onResultsChanged(
+        countries: summaries,
+        scannedAt: scanResult.scannedAt,
+        totalPhotosAnalyzed: scanResult.totalPhotosAnalyzed,
+        taggedPhotos: taggedPhotos,
+      );
       if (!mounted) return;
       setState(() {
         _scanning = false;
@@ -224,6 +277,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         SnackBar(content: Text('Scan failed: $e')),
       );
     }
+  }
+
+  /// Loads the saved home if there is one (a saved home is always
+  /// confirmed, so it's used as-is — no silent re-detection/overwrite).
+  /// Otherwise runs [HomeDetector] on this scan's photos and asks the user
+  /// to confirm it via [HomeConfirmScreen] before continuing. Returns null
+  /// if there's no home yet and the user dismisses the prompt without
+  /// confirming one.
+  Future<HomeLocation?> _resolveHome(List<TaggedPhoto> taggedPhotos) async {
+    final saved = await _homeLocationService.load();
+    if (saved != null) return saved;
+
+    final candidate = HomeDetector().detectHome(taggedPhotos);
+    if (candidate == null) return null;
+
+    // A throwaway (unfiltered) summary tree, used only to list every city
+    // already seen as alternatives in the confirm screen's city picker.
+    final unfiltered = VisitBuilder.buildFromTagged(taggedPhotos);
+    final alternatives = homeCandidatesFromCountries(unfiltered);
+
+    if (!mounted) return null;
+    final confirmed = await Navigator.of(context).push<HomeLocation>(
+      MaterialPageRoute(
+        builder: (_) => HomeConfirmScreen(candidate: candidate, alternatives: alternatives),
+      ),
+    );
+    if (confirmed != null) widget.onHomeChanged(confirmed);
+    return confirmed;
   }
 
   Future<void> _addTrip() async {
@@ -345,7 +426,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Text(
-              _formatLastUpdated(widget.lastScannedAt!),
+              _formatLastUpdated(widget.lastScannedAt!, widget.totalPhotosAnalyzed),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -619,5 +700,8 @@ class _CityTile extends StatelessWidget {
   }
 }
 
-String _formatLastUpdated(DateTime dt) =>
-    'Last updated ${DateFormat.yMMMd().add_jm().format(dt)}';
+String _formatLastUpdated(DateTime dt, int? totalPhotosAnalyzed) {
+  final base = 'Last updated ${DateFormat.yMMMd().add_jm().format(dt)}';
+  if (totalPhotosAnalyzed == null) return base;
+  return '$base · $totalPhotosAnalyzed photos analyzed';
+}
